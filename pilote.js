@@ -1,15 +1,14 @@
 
 var express = require('express');
 var path = require('path');
-var uuidv4 = require("uuid/v4");
 var generator = require('generate-password');
-
+var requestJSON = require('request-json');
 var bodyParser = require('body-parser');
 
 var dataSearchLayer = require('../Recherche/dataLayer.js');
 var dataLogLayer = require('../logSILO/dataLayer.js');
 var dataPlaylistLayer = require('../playlistSILO/dataLayer.js');
-var dataUserLayer = require('../userSILO/dataLayer.js');
+//var dataUserLayer = require('../userSILO/dataLayer.js');
 
 var app = express();
 var port = 8095;
@@ -18,6 +17,11 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({extended: true}));
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+
+var clientUser = requestJSON.createClient('http://localhost:8090/');    
+var clientPlaylist = requestJSON.createClient('http://localhost:8190/');  
+var clientSearch = requestJSON.createClient('http://localhost:8290/');  
 
 
 app.use(function(req, res, next){
@@ -50,15 +54,35 @@ app.use(function(req, res, next){
  * 
  * SSI user_id est admin
  */
-app.get('/api/admin/users/:user_id', function(req,res){
-    console.log('lololololol');
-    if(!req.params.user_id){
-        res.send({
+app.get('/api/admin/users/:user_id', function(request,response){
+    if(!request.params.user_id){
+        response.send({
             success:false,
             errorSet:['USER_ID_NOT_PROVIDED']
         });
     }else{
-        
+        let data = {
+            user_id:request.params.user_id
+        };
+        clientUser.post('/silo/isAdmin',data, function(err, res, body) {
+            if(err){
+                throw err;
+            }
+            if(body.isAdmin){
+                clientUser.post('/silo/getAllUsers',{}, function(err2, res2, body2){
+                    if(err2){
+                        throw err2;
+                    }
+                    response.send(body2)
+                })
+            }else{
+                response.send({
+                    success:false, 
+                    errorSet:['USER_ID_NOT_ADMIN']
+                })
+            }
+        });
+        /*
         dataUserLayer.isAdmin(req.params.user_id, function(isAdmin){
             if(isAdmin){
                 dataUserLayer.getAllUsers(function(data){
@@ -71,6 +95,7 @@ app.get('/api/admin/users/:user_id', function(req,res){
                 })
             }
         });
+        */
     }
 });
 
@@ -79,24 +104,32 @@ app.get('/api/admin/users/:user_id', function(req,res){
  * 
  * Création du compte
  */
-app.post('/api/users', function (req, res) {
-    if(!req.body.firstname || !req.body.lastname || !req.body.email || !req.body.password){
-        res.send({
+app.post('/api/users', function (request, response) {
+    if(!request.body.firstname || !request.body.lastname || !request.body.email || !request.body.password){
+        response.send({
             success:false,
             errorSet:['ONE_OR_MORE_FIELD_IS_EMPTY']
         });
     }else{
-        var user = {
-            firstname:req.body.firstname,
-            lastname:req.body.lastname,
-            email:req.body.email,
-            password:req.body.password
+        var data = {
+            firstname:request.body.firstname,
+            lastname:request.body.lastname,
+            email:request.body.email,
+            password:request.body.password
         };
 
+        clientUser.post('/silo/addAccount', data, function(err, res, body){
+            response.send({
+                success: body.success,
+                user_id:body.user_id
+            })
+        });
 
+        /*
         dataUserLayer.addAccount(user, function(success, user_id){
             res.send({ success:success, user_id:user_id});
         });
+        */
     }
 });
 
@@ -108,27 +141,42 @@ app.post('/api/users', function (req, res) {
  * SI password fourni, change le mdp,
  * SINON génère password et l'envoie par mail
  */
-app.put('/api/users', function(req,res){
-    if(!req.body.email){
-        res.send({
+app.put('/api/users', function(request,response){
+    if(!request.body.email){
+        response.send({
             success:false,
             errorSet:['EMAIL_FIELD_IS_EMPTY']
         });
     }else{
-        if(!req.body.password){
+        if(!request.body.password){
             //generate password
             password = generator.generate({
                 length: 10,
                 numbers: true
             });
         }else{
-            password = req.body.password;
+            password = request.body.password;
         }
 
         let data = {
             password: password,
-            email: req.body.email
+            email: request.body.email
         }
+
+        clientUser.post('/silo/updatePassword/', data, function(err, res, body){
+            if(body.success){
+                //send success
+                response.send({
+                    success:true
+                });
+            }else{
+                response.send({
+                    success:false,
+                    errorSet:['EMAIL_INCORRECT']
+                });
+            }
+        })
+        /*
         dataUserLayer.updatePassword(data, function(success){
             if(success){
                 //send success
@@ -142,6 +190,7 @@ app.put('/api/users', function(req,res){
                 });
             }
         })
+        */
     }
 });
 
@@ -150,13 +199,28 @@ app.put('/api/users', function(req,res){
  * 
  * Supprime le compte associé au user_id
  */
-app.delete('/api/users', function(req, res){
-    if(!req.body.user_id){
-        res.send({
+app.delete('/api/users', function(request, response){
+    if(!request.body.user_id){
+        response.send({
             success: false,
             errorSet :['USER_ID_FIELD_IS_EMPTY']
         });
     }else{
+        let data = {
+            user_id: request.body.user_id
+        }
+
+        clientUser.post('/silo/deleteAccount', data, function(err, res, body){
+            if(body.success){
+                res.send({success:body.success});
+            }else{
+                res.send({
+                    success:body.success,
+                    errorSet:['WRONG_USER_ID']
+                });
+            }
+        });
+        /*
         dataUserLayer.deleteAccount(req.body.user_id,function(success){
             if(success){
                 res.send({success:success});
@@ -167,6 +231,7 @@ app.delete('/api/users', function(req, res){
                 });
             }
         });
+        */
     }
 });
 
@@ -176,13 +241,28 @@ app.delete('/api/users', function(req, res){
  * Connecte l'utilisateur et renvoie son user_id
  * 
  */
-app.post('/api/users/connect', function (req,res){
-    if(!req.body.email || !req.body.password){
-        res.send({
+app.post('/api/users/connect', function (request,response){
+    if(!request.body.email || !request.body.password){
+        response.send({
             success: false,
             errorSet:['ONE_OR_MORE_FIELD_IS_EMPTY']
         });
     }else{
+        let data = {
+            email : request.body.email,
+            password : request.body.password
+        }
+        clientUser.post('/silo/getUserId', data, function(err, res, body){
+            if(body.data.success){
+                response.send(body.data);
+            }else{
+                response.send({
+                    success: false,
+                    errorSet:['EMAIL_OR_PASSWORD_INCORRECT']
+                });
+            }
+        });
+        /*
         dataUserLayer.getUserId(req.body, function(data){
             if(data.success){
                 res.send(data);
@@ -193,6 +273,7 @@ app.post('/api/users/connect', function (req,res){
                 });
             }
         })
+        */
     }
 });
 
@@ -201,26 +282,41 @@ app.post('/api/users/connect', function (req,res){
  * 
  * Obtient le profil de l'utilisateur demandé
  */
-app.get('/api/users/:user_id', function(req, res){
-    if(!req.params.user_id){
-        res.send({
+app.get('/api/users/:user_id', function(request, response){
+    if(!request.params.user_id){
+        response.send({
             success: false,
             errorSet :['USER_ID_FIELD_IS_EMPTY']
         });
     }else{
-        dataUserLayer.getUserObject(req.params.user_id,function(response){
-            if(response.success){
-                console.log('loooooool3');
-                console.log(response)
-                res.send(response.data[0]);
+        let data = {
+            user_id : request.params.user_id
+        }
+        clientUser.post('/silo/getUserObject', data, function(err, res, body){
+            if(body.success){
+                response.send(body.data[0]);
             }else{
-                console.log('loooooool4');
-                res.send({
-                    success:response.success,
+                response.send({
+                    success:body.success,
                     errorSet:['WRONG_USER_ID']
                 });
             }
         });
+        /*
+        dataUserLayer.getUserObject(request.params.user_id,function(res){
+            if(res.success){
+                console.log('loooooool3');
+                console.log(res)
+                response.send(res.data[0]);
+            }else{
+                console.log('loooooool4');
+                response.send({
+                    success:res.success,
+                    errorSet:['WRONG_USER_ID']
+                });
+            }
+        });
+        */
     }
 });
 
@@ -230,16 +326,32 @@ app.get('/api/users/:user_id', function(req, res){
  * Change la valeur demandée
  */
 app.put('/api/users/:user_id', function(req, res){
-    console.log("HEYYY")
     if(!req.params.user_id || !req.body.user_id || !req.body.value || !req.body.field){
         res.send({
             success: false,
             errorSet:['ONE_OR_MORE_FIELD_IS_EMPTY']
         });
     }else{
+        let dataToInsert = {
+            user_id : req.params.user_id,
+            field: req.body.field,
+            value: req.body.value,
+        }
         if((req.body.field == 'firstname' || req.body.field == 'lastname' 
             || req.body.field == 'email' || req.body.field == 'password')
             && req.params.user_id == req.body.user_id){
+            
+            clientUser.post('/silo/changeValue', dataToInsert, function(err, response, body){
+                if(body.success){
+                    res.send({success: true});
+                }else{
+                    res.send({
+                        success: false,
+                        errorSet:['UNKNOWN_ERROR']
+                    });
+                }
+            });
+            /*
             dataUserLayer.changeValue(req.params.user_id, req.body.field, req.body.value, function(success){
                 if(success){
                     res.send({success: true});
@@ -250,7 +362,40 @@ app.put('/api/users/:user_id', function(req, res){
                     });
                 }
             })
+            */
         }else if(req.body.field == 'active' || req.body.field == 'admin'){
+            clientUser.post('/silo/isAdmin',{user_id: req.params.user_id}, function(err, res, body) {
+                if(err){
+                    throw err;
+                }
+                if(body.isAdmin){
+                    clientUser.post('/silo/changeValue',{}, function(err2, res2, body2){
+                        if(err2){
+                            throw err2;
+                        }
+                        if(body2.success){
+                            res.send({success: true});
+                        }else{
+                            res.send({
+                                success: false,
+                                errorSet:['UNKNOWN_ERROR']
+                            });
+                        }
+                    });
+                }else{
+                    res.send({
+                        success:false, 
+                        errorSet:['UNKNOWN_ERROR']
+                    });
+                }
+            });
+        }else{
+            res.send({
+                success:false, 
+                errorSet:['WRONG_USER_ID']
+            });
+        }
+        /*
             dataUserLayer.isAdmin(req.body.user_id, function(isAdmin){
                 if(isAdmin){
                     dataUserLayer.changeValue(req.params.user_id, req.body.field, req.body.value, function(success){
@@ -269,15 +414,11 @@ app.put('/api/users/:user_id', function(req, res){
                         errorSet:['WRONG_USER_ID']
                     });
                 }
-            })
-        }else{
-            res.send({
-                success: false,
-                errorSet:['UNKNOWN_ERROR']
-            });
-        }
+            })*/
     }
 });
+            
+
 
 /***
  * =====================================================================================
@@ -299,12 +440,21 @@ app.get('/api/playlist/:userId', function(req, res){
             errorSet:['NO_USER_ID']
         });
     }else{
+        let data = {user_id: req.params.userId}
+        clientPlaylist.post('/silo/getPlaylistsForUser', data, function(err, response, body){
+            res.send({
+                success:true,
+                data:body.data
+            });
+        })
+        /*
         dataPlaylistLayer.getPlaylistsForUser(req.params.userId, function(data){
             res.send({
                 success:true,
                 data:data
             });
         });
+        */
     }
 });
 
@@ -329,9 +479,14 @@ app.post('/api/playlist', function(req, res){
             name: req.body.name,
             user_id: req.body.user_id
         }
+        clientPlaylist.post('/silo/createPlaylist', playlist, function(err, response, body){
+            res.send(body);
+        });
+        /*
         dataPlaylistLayer.createPlaylist(playlist, function(data){
             res.send(data);
         });
+        */
     }
 });
 
@@ -351,6 +506,17 @@ app.delete('/api/playlist', function(req, res){
             playlist_id: req.body.playlist_id,
             user_id:req.body.user_id
         }
+        clientPlaylist.post('/silo/deletePlaylist', data, function(err, response, body){
+            if(body.success){
+                res.send({success:body.success});
+            }else{
+                res.send({
+                    success:body.success,
+                    errorSet:['WRONG_USER_ID_OR_PLAYLIST_ID']
+                });
+            }
+        });
+        /*
         dataPlaylistLayer.deletePlaylist(data,function(success){
             if(success){
                 res.send({success:success});
@@ -361,6 +527,7 @@ app.delete('/api/playlist', function(req, res){
                 });
             }
         });
+        */
     }
 });
 
@@ -379,12 +546,18 @@ app.get('/api/:playlist_id/videos', function(req, res){
         });
     }else{
         /////////////////////////////
+        let data = {playlist_id: req.params.playlist_id};
+        clientPlaylist.post('/silo/getPlaylistVideos', data, function(err, response, body){
+            res.send(body);
+        });
+        /*
         dataPlaylistLayer.getPlaylistVideos(req.params.playlist_id, function(data){
             res.send({
                 success:true,
                 data:data
             });
         });
+        */
     }
 });
 
@@ -407,19 +580,20 @@ app.post('/api/oo/:playlist_id/videos', function(req, res){
             videoId : req.body.video_id
         }
 
-        console.log(getObject)
-
-        dataSearchLayer.getOne(getObject, function(data){
-           
+        clientSearch.post('/silo/getOne',getObject, function(err1, response1, body1){
             let video = {
                 platform: getObject.platformId,
                 videoId : getObject.videoId,
-                title : data.snippet.title,
-                description: data.snippet.description,
-            }
+                title : body1.snippet.title,
+                description: body1.snippet.description,
+            };
+            let data = {
+                playlist_id: req.params.playlist_id,
+                video: video
+            };
 
-            dataPlaylistLayer.addVideo(req.params.playlist_id,video, function(success){
-                res.send({success:success});
+            clientPlaylist.post('/silo/addVideo', data, function(err2, response2, body2){
+                res.send({success:body2.success});
             });
         });
 
@@ -455,6 +629,17 @@ app.delete('/api/:playlist_id/videos', function(req, res){
             playlist_id: req.params.playlist_id,
             video_id:req.body.video_id
         }
+        clientPlaylist.post('/silo/deletevideo', data, function(err, response, body){
+            if(body.success){
+                res.send({success:true});
+            }else{
+                res.send({
+                    success:false,
+                    errorSet:['WRONG_VIDEO_ID_OR_PLAYLIST_ID']
+                });
+            }
+        });
+        /*
         dataPlaylistLayer.deletevideo(data,function(success){
             if(success){
                 res.send({success:success});
@@ -465,6 +650,7 @@ app.delete('/api/:playlist_id/videos', function(req, res){
                 });
             }
         });
+        */
     }
 });
 
@@ -490,6 +676,22 @@ app.get('/api/log/historique', function(req, res){
             errorSet:['NO_USER_ID']
         });
     }else{
+        let data = {
+            user_id:req.body.user_id
+        };
+        clientUser.post('/silo/isAdmin', data, function(err1, response1, body1){
+            if(body1){
+                clientLog.post('/silo/getAllSearches', data, function(err2, response2, body2){
+                    res.send(body2);
+                })
+            }else{
+                res.send({
+                    success : false,
+                    errorSet:['NO_AUTHORIZATION']
+                });
+            }
+        });
+        /*
         dataUserLayer.isAdmin(req.body.user_id, function(admin){
             if(admin){
                 dataLogLayer.getAllSearches(function(data){
@@ -502,6 +704,7 @@ app.get('/api/log/historique', function(req, res){
                 });
             }
         })
+        */
     }
 });
 
@@ -517,9 +720,10 @@ app.get('/api/log/historique/:user_id', function(req, res){
             errorSet:['NO_USER_ID']
         });
     }else{
-        dataLogLayer.getAllSearchesForUser(req.params.user_id,function(data){
-            res.send(data);
-        });
+        let data ={user_id: req.params.user_id}
+        clientLog.post('/silo/getAllSearchesForUser', data, function(err2, response2, body2){
+            res.send(body2);
+        })
     }
 });
 
@@ -548,9 +752,21 @@ app.get('/api/log/users', function(req, res){
                             is_active: userObject.is_active,
                             is_admin: userObject.is_admin
                         }
+                        client.post('/silo/getPlaylistCount', userStatObject, function(err3,response3))
                         dataPlaylistLayer.getPlaylistCount(userObject.user_id, function(res1){
                             //add data.count dans le userStatObject
                             userStatObject.playlist_count = res1.count;
+                            clientLog.post('/silo/getStatsForUser', userStatObject, function(err4, response4, bodystats){
+                                if(bodystats.success){
+                                    userStatObject.playbacks_monthly_count = bodystats.playbacks_monthly_count;
+                                    userStatObject.last_login = bodystats.last_login;
+                                }else{
+                                    userStatObject.playbacks_monthly_count = bodystats.playbacks_monthly_count;
+                                    userStatObject.last_login = null;
+                                }
+                                array.push(userStatObject);
+                            });
+                            /*
                             dataLogLayer.getStatsForUser(userObject.user_id, function(res2){
                                 if(res2.success){
                                     userStatObject.playbacks_monthly_count = res2.playbacks_monthly_count;
@@ -561,6 +777,7 @@ app.get('/api/log/users', function(req, res){
                                 }
                                 array.push(userStatObject);
                             });
+                            */
                         })
                     });
                     res.send({
@@ -600,36 +817,15 @@ app.get('/api/search/:query',function(req,res){
             skip:null,
             maxResults:10
         }
+        clientSearch.post('/silo/search', searchObject, function(err, response, body){
+            res.send(body)
+        });
+        /*
         dataSearchLayer.search(searchObject, function(data){
             res.send(data);
         })
+        */
     }
-    
-    /*
-    let query = req.params.query;
-
-    clientVimeo.request({
-        method: 'GET',
-        path: '/videos',
-        query: {
-          page: 1,
-          per_page: 10,
-          query: query,
-          sort: 'relevant',
-          direction: 'asc'
-        }
-      }, function (error, body, status_code, headers) {
-        if (error) {
-          console.log(error);
-        }
-
-        search(10,query, function(result){
-            res.send({youtube:result,vimeo:body})
-        })
-      
-        //res.send(body)
-      })
-    */
 })
 
 app.get('/api/video/:platformId/:videoId', function(req,res){
@@ -644,39 +840,20 @@ app.get('/api/video/:platformId/:videoId', function(req,res){
             platformId : req.params.platformId,
             videoId : req.params.videoId
         }
+        clientSearch.post('/silo/getOne', getObject, function(err, response, body){
+            res.send(body);
+        });
+        /*
         dataSearchLayer.getOne(getObject, function(data){
             res.send(data);
         });
+        */
     }
-    /*
-    let platformId = req.params.platformId;
-    let videoId = req.params.videoId;
-
-    if(platformId == 1){ 
-     
-        getOne(videoId, function(result){
-            res.send(result.items[0])
-        })
-    }
-    else{
-        clientVimeo.request({
-            method: 'GET',
-            path: '/videos/'+videoId,
-          }, function (error, body, status_code, headers) {
-            if (error) {
-              console.log(error);
-            }
-
-            res.send(body)
-        })
-    }
-
-    */
 
 }); 
 
 ////////////////
-console.log("Server started port 8095");
+console.log("Server started port "+ port);
 if(process.env.PORT !== undefined){
     port= process.env.PORT;
 }
